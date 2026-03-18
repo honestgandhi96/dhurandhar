@@ -1,7 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import {
+  playBeep,
+  playCorrect,
+  playWrong,
+  playTick,
+  playUrgentTick,
+  playStampSlam,
+  playMissionComplete,
+  playFailure,
+  playStreak,
+} from "@/lib/sounds";
 
 interface Mission {
   id: number;
@@ -14,23 +25,8 @@ interface Mission {
   decoderTable: string[];
 }
 
+// Start from mission 2 since mission 1 was played on /mission
 const MISSIONS: Mission[] = [
-  {
-    id: 1,
-    title: "MISSION 1: THE INTERCEPTED CABLE",
-    cipherType: "Caesar Shift-3",
-    encoded: "PHHW DW WKH SRUW",
-    brief:
-      "A coded transmission was intercepted from Major Iqbal's compound in Lyari. Each letter has been shifted forward by 3 positions in the alphabet.",
-    timeLimit: 75,
-    hint: "Caesar cipher: each letter is shifted 3 positions forward. A→D, B→E, C→F...",
-    decoderTable: [
-      "A→D  B→E  C→F  D→G",
-      "E→H  F→I  G→J  H→K",
-      "M→P  N→Q  O→R  P→S",
-      "T→W  U→X  V→Y  W→Z",
-    ],
-  },
   {
     id: 2,
     title: "MISSION 2: THE MIRROR MESSAGE",
@@ -112,7 +108,7 @@ const MISSIONS: Mission[] = [
   {
     id: 7,
     title: "MISSION 7: THE FINAL TRANSMISSION",
-    cipherType: "Rail Fence + Caesar-5",
+    cipherType: "Caesar Shift-5",
     encoded: "YMJ  WJAJSLJ  NX  HTRQJYJ",
     brief:
       "The final message uses a Caesar shift of 5. This is the last piece of intelligence. Decode it to complete Operation Dhurandhar.",
@@ -132,9 +128,14 @@ interface MissionResult {
   score: number;
 }
 
-export default function GamePage() {
+function GameContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const agentName = searchParams.get("name") || sessionStorage.getItem("agent_name") || "AGENT";
+  const referralCode = searchParams.get("code") || sessionStorage.getItem("referral_code") || "";
+
   const [currentMission, setCurrentMission] = useState(0);
-  const [gameState, setGameState] = useState<"playing" | "complete">("playing");
+  const [gameState, setGameState] = useState<"intro" | "playing" | "transition" | "complete">("intro");
   const [answer, setAnswer] = useState("");
   const [timeLeft, setTimeLeft] = useState(MISSIONS[0].timeLimit);
   const [score, setScore] = useState(0);
@@ -145,37 +146,71 @@ export default function GamePage() {
   const [feedback, setFeedback] = useState<"" | "correct" | "wrong">("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [results, setResults] = useState<MissionResult[]>([]);
+  const [screenShake, setScreenShake] = useState(false);
+  const [screenFlash, setScreenFlash] = useState<"" | "green" | "red">("");
   const [copied, setCopied] = useState(false);
 
   const mission = MISSIONS[currentMission];
+
+  // Intro auto-advance
+  useEffect(() => {
+    if (gameState !== "intro") return;
+    playStampSlam();
+    const t = setTimeout(() => setGameState("playing"), 2000);
+    return () => clearTimeout(t);
+  }, [gameState]);
+
+  const triggerScreenShake = () => {
+    setScreenShake(true);
+    setTimeout(() => setScreenShake(false), 500);
+  };
+
+  const triggerFlash = (color: "green" | "red") => {
+    setScreenFlash(color);
+    setTimeout(() => setScreenFlash(""), 300);
+  };
 
   const advanceMission = useCallback(() => {
     const next = currentMission + 1;
     if (next >= MISSIONS.length) {
       setGameState("complete");
+      playMissionComplete();
     } else {
+      setGameState("transition");
       setCurrentMission(next);
       setTimeLeft(MISSIONS[next].timeLimit);
       setAnswer("");
       setFeedback("");
       setShowHint(false);
       setHintUsedThisMission(false);
+      setTimeout(() => {
+        setGameState("playing");
+        playStampSlam();
+      }, 1200);
     }
   }, [currentMission]);
 
   const handleSkip = useCallback(() => {
     setResults((r) => [...r, { completed: false, score: 0 }]);
     setStreak(0);
+    playFailure();
+    triggerScreenShake();
+    triggerFlash("red");
     advanceMission();
   }, [advanceMission]);
 
-  // Timer
+  // Timer with sound
   useEffect(() => {
     if (gameState !== "playing") return;
     if (feedback === "correct") return;
     if (timeLeft <= 0) {
       handleSkip();
       return;
+    }
+    if (timeLeft <= 10) {
+      playUrgentTick();
+    } else if (timeLeft <= 20) {
+      playTick();
     }
     const t = setTimeout(() => setTimeLeft((p) => p - 1), 1000);
     return () => clearTimeout(t);
@@ -196,6 +231,7 @@ export default function GamePage() {
   const handleSubmit = async () => {
     if (isSubmitting || !answer.trim()) return;
     setIsSubmitting(true);
+    playBeep();
 
     try {
       const res = await fetch("/api/validate", {
@@ -209,28 +245,40 @@ export default function GamePage() {
       const data = await res.json();
 
       if (data.correct) {
+        const newStreak = streak + 1;
         const missionScore = calculateScore(hintUsedThisMission);
         setScore((s) => s + missionScore);
-        setStreak((s) => s + 1);
+        setStreak(newStreak);
         setFeedback("correct");
         setResults((r) => [...r, { completed: true, score: missionScore }]);
+        playCorrect();
+        triggerFlash("green");
+        if (newStreak >= 2) {
+          setTimeout(() => playStreak(newStreak), 400);
+        }
 
         setTimeout(() => advanceMission(), 1500);
       } else {
         setFeedback("wrong");
         setStreak(0);
+        playWrong();
+        triggerScreenShake();
+        triggerFlash("red");
         setTimeout(() => setFeedback(""), 1000);
       }
     } catch {
       setFeedback("wrong");
+      playWrong();
+      triggerScreenShake();
       setTimeout(() => setFeedback(""), 1000);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const useHint = () => {
+  const useHintAction = () => {
     if (hintsLeft <= 0) return;
+    playBeep();
     setHintsLeft((h) => h - 1);
     setShowHint(true);
     setHintUsedThisMission(true);
@@ -243,15 +291,81 @@ export default function GamePage() {
         ? "timer-amber"
         : "timer-normal";
 
+  const timerPulse = timeLeft <= 10 ? "animate-pulse" : "";
+
+  // Progress bar
+  const progress = ((currentMission + (feedback === "correct" ? 1 : 0)) / MISSIONS.length) * 100;
+
+  // Screen effect classes
+  const shakeClass = screenShake ? "animate-shake" : "";
+  const flashClass = screenFlash === "green"
+    ? "screen-flash-green"
+    : screenFlash === "red"
+      ? "screen-flash-red"
+      : "";
+
+  // Intro screen
+  if (gameState === "intro") {
+    return (
+      <main className="min-h-dvh bg-terminal-bg flex items-center justify-center px-4">
+        <div className="text-center space-y-4 animate-fadeIn">
+          <p className="text-terminal-amber text-sm font-mono tracking-widest">
+            INCOMING TRANSMISSION
+          </p>
+          <h1 className="text-terminal-green text-2xl md:text-3xl font-heading font-bold">
+            AGENT {agentName}
+          </h1>
+          <p className="text-terminal-green text-lg font-mono">
+            6 CIPHERS REMAIN. DECODE THEM ALL.
+          </p>
+          <div className="flex justify-center gap-1 mt-4">
+            {MISSIONS.map((_, i) => (
+              <div key={i} className="w-8 h-1 bg-terminal-border" />
+            ))}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Transition between missions
+  if (gameState === "transition") {
+    return (
+      <main className="min-h-dvh bg-terminal-bg flex items-center justify-center px-4">
+        <div className="text-center space-y-4 animate-fadeIn">
+          <p className="text-terminal-green text-lg font-mono tracking-widest">
+            LOADING NEXT TRANSMISSION...
+          </p>
+          <div className="flex justify-center gap-1">
+            {MISSIONS.map((_, i) => (
+              <div
+                key={i}
+                className={`w-8 h-1 ${
+                  i < currentMission
+                    ? results[i]?.completed
+                      ? "bg-terminal-green"
+                      : "bg-terminal-danger"
+                    : "bg-terminal-border"
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Complete screen
   if (gameState === "complete") {
     const emojiGrid = results
       .map((r) => (r.completed ? "✅" : "❌"))
       .join("");
-    const shareText = `🕵️ Operation Dhurandhar — Cipher Game\nScore: ${score}\n${emojiGrid}\nCan you beat my score?\n#Dhurandhar2 #OperationDhurandhar`;
+    const completedCount = results.filter((r) => r.completed).length;
+    const shareText = `🕵️ Operation Dhurandhar — Cipher Game\nScore: ${score} | ${completedCount}/${MISSIONS.length} missions\n${emojiGrid}\nCan you beat my score?\n#Dhurandhar2 #OperationDhurandhar`;
 
     return (
       <main className="min-h-dvh bg-terminal-bg px-4 py-8 flex flex-col items-center justify-center">
-        <div className="max-w-lg w-full space-y-6 text-center">
+        <div className="max-w-lg w-full space-y-6 text-center animate-fadeIn">
           <h1 className="text-terminal-green text-2xl font-heading font-bold">
             OPERATION COMPLETE
           </h1>
@@ -272,13 +386,13 @@ export default function GamePage() {
                 key={i}
                 className="flex justify-between font-mono text-sm text-terminal-dim"
               >
-                <span>Mission {i + 1}</span>
+                <span>Mission {i + 2}</span>
                 <span
                   className={
                     r.completed ? "text-terminal-green" : "text-terminal-danger"
                   }
                 >
-                  {r.completed ? `+${r.score}` : "SKIPPED"}
+                  {r.completed ? `+${r.score}` : "FAILED"}
                 </span>
               </div>
             ))}
@@ -288,38 +402,54 @@ export default function GamePage() {
             onClick={() => {
               navigator.clipboard.writeText(shareText);
               setCopied(true);
+              playBeep();
               setTimeout(() => setCopied(false), 2000);
             }}
-            className="btn-primary"
+            className="btn-primary w-full"
           >
             {copied ? "COPIED!" : "COPY SCORE TO SHARE"}
           </button>
 
-          <Link
-            href="/mission"
-            className="text-terminal-dim hover:text-terminal-green text-sm underline block"
+          <button
+            onClick={() => {
+              playBeep();
+              router.push(
+                `/debrief?name=${encodeURIComponent(agentName)}&code=${referralCode}&score=${score}`
+              );
+            }}
+            className="btn-primary w-full bg-terminal-amber text-black"
           >
-            Try the quick mission →
-          </Link>
+            PROCEED TO DEBRIEF →
+          </button>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-dvh bg-terminal-bg px-4 py-4">
+    <main className={`min-h-dvh bg-terminal-bg px-4 py-4 ${shakeClass} ${flashClass}`}>
       <div className="max-w-lg mx-auto space-y-4">
+        {/* Progress bar */}
+        <div className="w-full h-1 bg-terminal-border overflow-hidden">
+          <div
+            className="h-full bg-terminal-green transition-all duration-500"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+
         {/* Score panel */}
         <div className="flex justify-between items-center text-sm font-mono border border-terminal-border px-3 py-2">
           <span className="text-terminal-green">
             SCORE: <span className="font-bold">{score}</span>
           </span>
           <span className="text-terminal-dim">
-            MISSION {currentMission + 1}/7
+            {currentMission + 1}/{MISSIONS.length}
           </span>
-          <span className="text-terminal-amber">
-            STREAK: {streak}
-          </span>
+          {streak >= 2 && (
+            <span className="text-terminal-amber animate-pulse">
+              🔥 x{streak}
+            </span>
+          )}
           <span className="text-terminal-dim">
             HINTS: {hintsLeft}
           </span>
@@ -376,7 +506,7 @@ export default function GamePage() {
 
         {/* Timer */}
         <div className="text-center">
-          <span className={`text-4xl font-mono font-bold ${timerColor}`}>
+          <span className={`text-4xl font-mono font-bold ${timerColor} ${timerPulse}`}>
             {String(Math.floor(timeLeft / 60)).padStart(2, "0")}:
             {String(timeLeft % 60).padStart(2, "0")}
           </span>
@@ -398,12 +528,17 @@ export default function GamePage() {
 
           {/* Feedback */}
           {feedback === "correct" && (
-            <p className="text-terminal-green text-center font-mono text-sm animate-fadeIn">
+            <p className="text-terminal-green text-center font-mono text-sm animate-fadeIn font-bold">
               ✓ CORRECT — TRANSMISSION DECODED
+              {streak >= 2 && (
+                <span className="text-terminal-amber ml-2">
+                  🔥 {streak}x STREAK BONUS!
+                </span>
+              )}
             </p>
           )}
           {feedback === "wrong" && (
-            <p className="text-terminal-danger text-center font-mono text-sm animate-shake">
+            <p className="text-terminal-danger text-center font-mono text-sm animate-shake font-bold">
               ✗ INCORRECT — TRY AGAIN
             </p>
           )}
@@ -417,11 +552,11 @@ export default function GamePage() {
               DECODE
             </button>
             <button
-              onClick={useHint}
+              onClick={useHintAction}
               disabled={hintsLeft <= 0}
               className="btn-secondary disabled:opacity-30 disabled:cursor-not-allowed text-sm"
             >
-              USE HINT (-50pts)
+              HINT (-50)
             </button>
             <button onClick={handleSkip} className="btn-secondary text-sm">
               SKIP
@@ -430,5 +565,19 @@ export default function GamePage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function GamePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-dvh flex items-center justify-center bg-terminal-bg">
+          <p className="text-terminal-green">Loading missions...</p>
+        </main>
+      }
+    >
+      <GameContent />
+    </Suspense>
   );
 }

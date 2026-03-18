@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { playBeep, playCorrect, playWrong, playStampSlam, playTick, playUrgentTick, playFailure } from "@/lib/sounds";
 
 const AGENT_NAMES = ["SHADOW", "GHOST", "VIPER", "FALCON", "WOLF", "CIPHER"];
 
@@ -66,6 +67,7 @@ function MissionContent() {
   const handleConfirmName = async () => {
     const name = selectedName || customName.trim().toUpperCase();
     if (!name) return;
+    playBeep();
 
     try {
       const res = await fetch("/api/agent", {
@@ -86,15 +88,22 @@ function MissionContent() {
       // Continue even if API fails — don't block flow
     }
     setStep("dossier");
+    setTimeout(() => playStampSlam(), 200);
   };
 
-  // Countdown timer
+  // Countdown timer with sound
   useEffect(() => {
     if (step !== "dossier") return;
     if (answerState === "correct" || answerState === "failed") return;
     if (timeLeft <= 0) {
       setAnswerState("failed");
+      playFailure();
       return;
+    }
+    if (timeLeft <= 10) {
+      playUrgentTick();
+    } else if (timeLeft <= 20) {
+      playTick();
     }
     const t = setTimeout(() => setTimeLeft((p) => p - 1), 1000);
     return () => clearTimeout(t);
@@ -116,23 +125,27 @@ function MissionContent() {
 
         if (data.correct) {
           setAnswerState("correct");
+          playCorrect();
           setTimeout(() => {
             router.push(
-              `/debrief?name=${encodeURIComponent(agentName)}&code=${referralCode}`
+              `/game?name=${encodeURIComponent(agentName)}&code=${referralCode}`
             );
           }, 1500);
         } else {
           setAnswerState("wrong");
+          playWrong();
           const newAttempts = wrongAttempts + 1;
           setWrongAttempts(newAttempts);
           if (newAttempts >= 3) {
             setAnswerState("failed");
+            playFailure();
           } else {
             setTimeout(() => setAnswerState("idle"), 1000);
           }
         }
       } catch {
         setAnswerState("wrong");
+        playWrong();
         setTimeout(() => setAnswerState("idle"), 1000);
       } finally {
         setIsSubmitting(false);
@@ -267,7 +280,7 @@ function MissionContent() {
                 <button
                   onClick={() =>
                     router.push(
-                      `/debrief?name=${encodeURIComponent(agentName)}&code=${referralCode}`
+                      `/game?name=${encodeURIComponent(agentName)}&code=${referralCode}`
                     )
                   }
                   className="bg-dossier-stamp text-white font-heading font-bold px-6 py-3
