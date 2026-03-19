@@ -26,6 +26,16 @@ interface Mission {
 }
 
 // Start from mission 2 since mission 1 was played on /mission
+const MISSION_ANSWERS: Record<number, string> = {
+  1: "MEET AT THE PORT",
+  2: "TRUST NO ONE",
+  3: "DANGER IN KARACHI",
+  4: "ABORT",
+  5: "OPERATION REVENGE",
+  6: "HAMZA LIVES",
+  7: "THE REVENGE IS COMPLETE",
+};
+
 const MISSIONS: Mission[] = [
   {
     id: 2,
@@ -143,12 +153,13 @@ function GameContent() {
   const [hintsLeft, setHintsLeft] = useState(3);
   const [showHint, setShowHint] = useState(false);
   const [hintUsedThisMission, setHintUsedThisMission] = useState(false);
-  const [feedback, setFeedback] = useState<"" | "correct" | "wrong">("");
+  const [feedback, setFeedback] = useState<"" | "correct" | "wrong" | "reveal">("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [results, setResults] = useState<MissionResult[]>([]);
   const [screenShake, setScreenShake] = useState(false);
   const [screenFlash, setScreenFlash] = useState<"" | "green" | "red">("");
   const [copied, setCopied] = useState(false);
+  const [wrongAttempts, setWrongAttempts] = useState(0);
 
   const mission = MISSIONS[currentMission];
 
@@ -187,6 +198,7 @@ function GameContent() {
         setGameState("playing");
         playStampSlam();
       }, 1200);
+      setWrongAttempts(0);
     }
   }, [currentMission]);
 
@@ -197,12 +209,14 @@ function GameContent() {
     triggerScreenShake();
     triggerFlash("red");
     advanceMission();
+    setFeedback("reveal");
+    setTimeout(() => advanceMission(), 2500);
   }, [advanceMission]);
 
   // Timer with sound
   useEffect(() => {
     if (gameState !== "playing") return;
-    if (feedback === "correct") return;
+    if (feedback === "correct" || feedback === "reveal") return;
     if (timeLeft <= 0) {
       handleSkip();
       return;
@@ -259,12 +273,21 @@ function GameContent() {
 
         setTimeout(() => advanceMission(), 1500);
       } else {
-        setFeedback("wrong");
+        const newWrong = wrongAttempts + 1;
+        setWrongAttempts(newWrong);
         setStreak(0);
         playWrong();
         triggerScreenShake();
         triggerFlash("red");
         setTimeout(() => setFeedback(""), 1000);
+        if (newWrong >= 3) {
+          setFeedback("reveal");
+          setResults((r) => [...r, { completed: false, score: 0 }]);
+          setTimeout(() => advanceMission(), 2500);
+        } else {
+          setFeedback("wrong");
+          setTimeout(() => setFeedback(""), 1000);
+        }
       }
     } catch {
       setFeedback("wrong");
@@ -357,6 +380,8 @@ function GameContent() {
 
   // Complete screen
   if (gameState === "complete") {
+    const completedCount = results.filter((r) => r.completed).length;
+    const failedCount = results.filter((r) => !r.completed).length;
     const emojiGrid = results
       .map((r) => (r.completed ? "✅" : "❌"))
       .join("");
@@ -368,7 +393,36 @@ function GameContent() {
         <div className="max-w-lg w-full space-y-6 text-center animate-fadeIn">
           <h1 className="text-terminal-green text-2xl font-heading font-bold">
             OPERATION COMPLETE
+
+    const completionTitle =
+      completedCount === MISSIONS.length
+        ? "OPERATION COMPLETE — OUTSTANDING, AGENT"
+        : completedCount >= 5
+          ? "OPERATION COMPLETE — WELL DONE, AGENT"
+          : completedCount >= 3
+            ? "OPERATION INCOMPLETE — PARTIAL SUCCESS"
+            : "OPERATION FAILED — BETTER LUCK NEXT TIME, AGENT";
+
+    const completionColor =
+      completedCount >= 5
+        ? "text-terminal-green"
+        : completedCount >= 3
+          ? "text-terminal-amber"
+          : "text-terminal-danger";
+
+    const shareText = `🕵️ Operation Dhurandhar — Cipher Game\nScore: ${score}\n${emojiGrid}\nCan you beat my score?\n#Dhurandhar2 #OperationDhurandhar`;
+
+    return (
+      <main className="min-h-dvh bg-terminal-bg px-4 py-8 flex flex-col items-center justify-center">
+        <div className="max-w-lg w-full space-y-6 text-center">
+          <h1 className={`${completionColor} text-2xl font-heading font-bold`}>
+            {completionTitle}
           </h1>
+          {failedCount >= 6 && (
+            <p className="text-terminal-dim font-mono text-sm">
+              You decoded {completedCount} of {MISSIONS.length} transmissions. Train harder and try again.
+            </p>
+          )}
           <p className="text-terminal-amber text-5xl font-mono font-bold">
             {score}
           </p>
@@ -384,7 +438,7 @@ function GameContent() {
             {results.map((r, i) => (
               <div
                 key={i}
-                className="flex justify-between font-mono text-sm text-terminal-dim"
+                className="font-mono text-sm text-terminal-dim"
               >
                 <span>Mission {i + 2}</span>
                 <span
@@ -394,6 +448,21 @@ function GameContent() {
                 >
                   {r.completed ? `+${r.score}` : "FAILED"}
                 </span>
+                <div className="flex justify-between">
+                  <span>Mission {i + 1}</span>
+                  <span
+                    className={
+                      r.completed ? "text-terminal-green" : "text-terminal-danger"
+                    }
+                  >
+                    {r.completed ? `+${r.score}` : "FAILED"}
+                  </span>
+                </div>
+                {!r.completed && (
+                  <p className="text-terminal-amber text-xs mt-1">
+                    Answer: {MISSION_ANSWERS[i + 1]}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -540,13 +609,25 @@ function GameContent() {
           {feedback === "wrong" && (
             <p className="text-terminal-danger text-center font-mono text-sm animate-shake font-bold">
               ✗ INCORRECT — TRY AGAIN
+            <p className="text-terminal-danger text-center font-mono text-sm animate-shake">
+              ✗ INCORRECT — TRY AGAIN ({3 - wrongAttempts} attempt{3 - wrongAttempts !== 1 ? "s" : ""} left)
             </p>
+          )}
+          {feedback === "reveal" && (
+            <div className="text-center space-y-1 animate-fadeIn">
+              <p className="text-terminal-danger font-mono text-sm">
+                DECRYPTION FAILED — THE ANSWER WAS:
+              </p>
+              <p className="text-terminal-amber font-mono text-lg font-bold">
+                {MISSION_ANSWERS[mission.id]}
+              </p>
+            </div>
           )}
 
           <div className="flex gap-2">
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting || !answer.trim()}
+              disabled={isSubmitting || !answer.trim() || feedback === "reveal"}
               className="btn-primary flex-1 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               DECODE
@@ -558,7 +639,7 @@ function GameContent() {
             >
               HINT (-50)
             </button>
-            <button onClick={handleSkip} className="btn-secondary text-sm">
+            <button onClick={handleSkip} disabled={feedback === "reveal"} className="btn-secondary text-sm disabled:opacity-30 disabled:cursor-not-allowed">
               SKIP
             </button>
           </div>
