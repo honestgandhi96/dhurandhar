@@ -73,10 +73,7 @@ export async function POST(request: NextRequest) {
     }
 
     const correct = normalize(answer) === normalize(correctAnswer);
-    return NextResponse.json({
-      correct,
-      ...(!correct && { answer: correctAnswer }),
-    });
+    return NextResponse.json({ correct });
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }

@@ -153,7 +153,6 @@ function GameContent() {
   const [copied, setCopied] = useState(false);
   const [revealedAnswer, setRevealedAnswer] = useState("");
   const [revealedAnswers, setRevealedAnswers] = useState<Record<number, string>>({});
-  const wrongAttemptsRef = useRef(0);
   const missionResultRecorded = useRef(false);
 
   const mission = MISSIONS[currentMission];
@@ -190,7 +189,6 @@ function GameContent() {
       setRevealedAnswer("");
       setShowHint(false);
       setHintUsedThisMission(false);
-      wrongAttemptsRef.current = 0;
       missionResultRecorded.current = false;
       setTimeout(() => {
         setGameState("playing");
@@ -294,27 +292,12 @@ function GameContent() {
         }
         setTimeout(() => advanceMission(), 1500);
       } else {
-        wrongAttemptsRef.current += 1;
         setStreak(0);
         playWrong();
         triggerScreenShake();
         triggerFlash("red");
-        if (wrongAttemptsRef.current >= 3) {
-          if (data.answer) {
-            setRevealedAnswer(data.answer);
-            setRevealedAnswers((prev) => ({
-              ...prev,
-              [mission.id]: data.answer,
-            }));
-          }
-          missionResultRecorded.current = true;
-          setResults((r) => [...r, { completed: false, score: 0 }]);
-          setFeedback("reveal");
-          setTimeout(() => advanceMission(), 2500);
-        } else {
-          setFeedback("wrong");
-          setTimeout(() => setFeedback(""), 1000);
-        }
+        setFeedback("wrong");
+        setTimeout(() => setFeedback(""), 1000);
       }
     } catch {
       setFeedback("wrong");
@@ -626,9 +609,7 @@ function GameContent() {
           )}
           {feedback === "wrong" && (
             <p className="text-terminal-danger text-center font-mono text-sm animate-shake font-bold">
-              ✗ INCORRECT — TRY AGAIN (
-              {3 - wrongAttemptsRef.current} attempt
-              {3 - wrongAttemptsRef.current !== 1 ? "s" : ""} left)
+              ✗ INCORRECT — TRY AGAIN
             </p>
           )}
           {feedback === "reveal" && (
