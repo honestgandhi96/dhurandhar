@@ -14,6 +14,7 @@ function DebriefContent() {
   const searchParams = useSearchParams();
   const name = searchParams.get("name") || "AGENT";
   const code = searchParams.get("code") || "";
+  const gameScore = searchParams.get("score");
   const [recruitsCount, setRecruitsCount] = useState(0);
   const [friendNames, setFriendNames] = useState(["", "", ""]);
   const [revealedText, setRevealedText] = useState("");
@@ -85,8 +86,16 @@ function DebriefContent() {
         {/* Top section — terminal style */}
         <div className="space-y-4 text-center">
           <p className="text-terminal-green text-xl font-heading font-bold">
-            TRANSMISSION DECODED, AGENT {name}.
+            OPERATION COMPLETE, AGENT {name}.
           </p>
+          {gameScore && (
+            <div className="space-y-1">
+              <p className="text-terminal-amber text-4xl font-mono font-bold">
+                {gameScore}
+              </p>
+              <p className="text-terminal-dim text-xs">MISSION SCORE</p>
+            </div>
+          )}
           <p className="text-terminal-green text-2xl font-mono tracking-[0.2em]">
             {revealedText}
             {revealedText.length < decodedMessage.length && (
@@ -165,13 +174,6 @@ function DebriefContent() {
             className="text-terminal-dim hover:text-terminal-green text-sm underline"
           >
             View Leaderboard →
-          </Link>
-          <br />
-          <Link
-            href="/game"
-            className="text-terminal-dim hover:text-terminal-green text-sm underline"
-          >
-            Think you can handle more? → Play the full cipher game
           </Link>
         </div>
       </div>
