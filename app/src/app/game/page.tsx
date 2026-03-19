@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 
 interface Mission {
@@ -13,16 +13,6 @@ interface Mission {
   hint: string;
   decoderTable: string[];
 }
-
-const MISSION_ANSWERS: Record<number, string> = {
-  1: "MEET AT THE PORT",
-  2: "TRUST NO ONE",
-  3: "DANGER IN KARACHI",
-  4: "ABORT",
-  5: "OPERATION REVENGE",
-  6: "HAMZA LIVES",
-  7: "THE REVENGE IS COMPLETE",
-};
 
 const MISSIONS: Mission[] = [
   {
@@ -156,7 +146,10 @@ export default function GamePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [results, setResults] = useState<MissionResult[]>([]);
   const [copied, setCopied] = useState(false);
-  const [wrongAttempts, setWrongAttempts] = useState(0);
+  const [revealedAnswer, setRevealedAnswer] = useState("");
+  const [revealedAnswers, setRevealedAnswers] = useState<Record<number, string>>({});
+  const wrongAttemptsRef = useRef(0);
+  const missionResultRecorded = useRef(false);
 
   const mission = MISSIONS[currentMission];
 
@@ -169,18 +162,42 @@ export default function GamePage() {
       setTimeLeft(MISSIONS[next].timeLimit);
       setAnswer("");
       setFeedback("");
+      setRevealedAnswer("");
       setShowHint(false);
       setHintUsedThisMission(false);
-      setWrongAttempts(0);
+      wrongAttemptsRef.current = 0;
+      missionResultRecorded.current = false;
     }
   }, [currentMission]);
 
-  const handleSkip = useCallback(() => {
+  const revealAndFail = useCallback(async (missionId: number) => {
+    if (missionResultRecorded.current) return;
+    missionResultRecorded.current = true;
+
+    try {
+      const res = await fetch("/api/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question_id: missionId, reveal: true }),
+      });
+      const data = await res.json();
+      if (data.answer) {
+        setRevealedAnswer(data.answer);
+        setRevealedAnswers((prev) => ({ ...prev, [missionId]: data.answer }));
+      }
+    } catch {
+      // Continue even if reveal fails
+    }
+
     setResults((r) => [...r, { completed: false, score: 0 }]);
     setStreak(0);
     setFeedback("reveal");
     setTimeout(() => advanceMission(), 2500);
   }, [advanceMission]);
+
+  const handleSkip = useCallback(() => {
+    revealAndFail(mission.id);
+  }, [revealAndFail, mission.id]);
 
   // Timer
   useEffect(() => {
@@ -207,7 +224,7 @@ export default function GamePage() {
   );
 
   const handleSubmit = async () => {
-    if (isSubmitting || !answer.trim()) return;
+    if (isSubmitting || !answer.trim() || feedback === "reveal") return;
     setIsSubmitting(true);
 
     try {
@@ -226,16 +243,21 @@ export default function GamePage() {
         setScore((s) => s + missionScore);
         setStreak((s) => s + 1);
         setFeedback("correct");
+        missionResultRecorded.current = true;
         setResults((r) => [...r, { completed: true, score: missionScore }]);
 
         setTimeout(() => advanceMission(), 1500);
       } else {
-        const newWrong = wrongAttempts + 1;
-        setWrongAttempts(newWrong);
+        wrongAttemptsRef.current += 1;
         setStreak(0);
-        if (newWrong >= 3) {
-          setFeedback("reveal");
+        if (wrongAttemptsRef.current >= 3) {
+          if (data.answer) {
+            setRevealedAnswer(data.answer);
+            setRevealedAnswers((prev) => ({ ...prev, [mission.id]: data.answer }));
+          }
+          missionResultRecorded.current = true;
           setResults((r) => [...r, { completed: false, score: 0 }]);
+          setFeedback("reveal");
           setTimeout(() => advanceMission(), 2500);
         } else {
           setFeedback("wrong");
@@ -266,7 +288,6 @@ export default function GamePage() {
 
   if (gameState === "complete") {
     const completedCount = results.filter((r) => r.completed).length;
-    const failedCount = results.filter((r) => !r.completed).length;
     const emojiGrid = results
       .map((r) => (r.completed ? "✅" : "❌"))
       .join("");
@@ -295,7 +316,7 @@ export default function GamePage() {
           <h1 className={`${completionColor} text-2xl font-heading font-bold`}>
             {completionTitle}
           </h1>
-          {failedCount >= 6 && (
+          {completedCount <= 1 && (
             <p className="text-terminal-dim font-mono text-sm">
               You decoded {completedCount} of {MISSIONS.length} transmissions. Train harder and try again.
             </p>
@@ -327,9 +348,9 @@ export default function GamePage() {
                     {r.completed ? `+${r.score}` : "FAILED"}
                   </span>
                 </div>
-                {!r.completed && (
+                {!r.completed && revealedAnswers[i + 1] && (
                   <p className="text-terminal-amber text-xs mt-1">
-                    Answer: {MISSION_ANSWERS[i + 1]}
+                    Answer: {revealedAnswers[i + 1]}
                   </p>
                 )}
               </div>
@@ -441,7 +462,7 @@ export default function GamePage() {
             placeholder="TYPE YOUR ANSWER..."
             value={answer}
             onChange={(e) => setAnswer(e.target.value.toUpperCase())}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            onKeyDown={(e) => e.key === "Enter" && feedback !== "reveal" && handleSubmit()}
             className="w-full bg-transparent border border-terminal-border text-terminal-green
                        px-4 py-3 font-mono text-lg uppercase placeholder:text-terminal-dim/50
                        focus:outline-none focus:border-terminal-green"
@@ -456,7 +477,7 @@ export default function GamePage() {
           )}
           {feedback === "wrong" && (
             <p className="text-terminal-danger text-center font-mono text-sm animate-shake">
-              ✗ INCORRECT — TRY AGAIN ({3 - wrongAttempts} attempt{3 - wrongAttempts !== 1 ? "s" : ""} left)
+              ✗ INCORRECT — TRY AGAIN ({3 - wrongAttemptsRef.current} attempt{3 - wrongAttemptsRef.current !== 1 ? "s" : ""} left)
             </p>
           )}
           {feedback === "reveal" && (
@@ -465,7 +486,7 @@ export default function GamePage() {
                 DECRYPTION FAILED — THE ANSWER WAS:
               </p>
               <p className="text-terminal-amber font-mono text-lg font-bold">
-                {MISSION_ANSWERS[mission.id]}
+                {revealedAnswer}
               </p>
             </div>
           )}

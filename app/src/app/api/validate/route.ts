@@ -42,11 +42,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { answer, question_id } = body;
+    const { answer, question_id, reveal } = body;
 
-    if (!answer || !question_id) {
+    if (!question_id) {
       return NextResponse.json(
-        { error: "Missing answer or question_id" },
+        { error: "Missing question_id" },
         { status: 400 }
       );
     }
@@ -61,8 +61,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (reveal) {
+      return NextResponse.json({ correct: false, answer: correctAnswer });
+    }
+
+    if (!answer) {
+      return NextResponse.json(
+        { error: "Missing answer" },
+        { status: 400 }
+      );
+    }
+
     const correct = normalize(answer) === normalize(correctAnswer);
-    return NextResponse.json({ correct });
+    return NextResponse.json({
+      correct,
+      ...(!correct && { answer: correctAnswer }),
+    });
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
